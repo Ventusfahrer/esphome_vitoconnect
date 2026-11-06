@@ -77,6 +77,7 @@ class OptolinkDP {
    * 
    */
   ~OptolinkDP();
+  OptolinkDP& operator=(const OptolinkDP& other);
   uint16_t address;  //!< Address of the datapoint, 2 bytes
   uint8_t length;    //!< Length of the dataponit, 1 byte
   bool write;        //!< Mark the dataponit as writeable (true) or not (false)

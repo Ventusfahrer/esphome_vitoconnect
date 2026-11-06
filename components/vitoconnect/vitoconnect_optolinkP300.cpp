@@ -24,6 +24,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
 #include "vitoconnect_optolinkP300.h"
+#include "esphome/core/log.h"
 
 namespace esphome {
 namespace vitoconnect {
@@ -198,48 +199,55 @@ void OptolinkP300::_sentAck() {
 }
 
 void OptolinkP300::_receive() {
-  while (_uart->available() != 0) {  // read complete RX buffer
-    _rcvBuffer[_rcvBufferLen] = _uart->read();
-    ++_rcvBufferLen;
+  while (_uart->available() != 0) {
+    const uint8_t byte = _uart->read();
     _lastMillis = millis();
-  }
-  if (_rcvBuffer[0] != 0x41) {
-    // wait for start byte
-    return;
-  }
-  // ESP_LOGD(TAG, "buffer fill: %02x", _rcvBuffer[_rcvBufferLen-1]);
-  // ESP_LOGD(TAG, "buffer fill: %d", _rcvBufferLen);
-  // ESP_LOGD(TAG, "buffer fill: %d", _rcvLen);
-  if (_rcvBufferLen == _rcvLen) {     // message complete, check message
-    if (_rcvBuffer[1] != (_rcvLen - 3)) {  // check for message length
+    if (_rcvBufferLen == 0 && byte != 0x41) continue;
+    if (_rcvBufferLen >= sizeof(_rcvBuffer)) {
       _tryOnError(LENGTH);
       _state = RECEIVE_ACK;
       return;
     }
-    if (_rcvBuffer[2] != 0x01) {  // Vitotronic returns an error message
-      _tryOnError(VITO_ERROR);
-      _state = RECEIVE_ACK;
-      return;
+    _rcvBuffer[_rcvBufferLen++] = byte;
+    if (_rcvBufferLen == 2) {
+      // Error responses can be longer than a successful write response.
+      _rcvLen = size_t(_rcvBuffer[1]) + 3;
+      if (_rcvLen < 8 || _rcvLen > sizeof(_rcvBuffer)) {
+        _tryOnError(LENGTH);
+        _state = RECEIVE_ACK;
+        return;
+      }
     }
-    if (!checkChecksum(_rcvBuffer, _rcvLen)) {  // checksum is wrong
+    if (_rcvBufferLen < 2 || _rcvBufferLen != _rcvLen) continue;
+    _state = RECEIVE_ACK;
+    if (!checkChecksum(_rcvBuffer, _rcvLen)) {
       _tryOnError(CRC);
-      _state = RECEIVE_ACK;  // TODO(@bertmelis): should we return NACK?
       return;
     }
     OptolinkDP* dp = _queue.front();
-    if (_rcvBuffer[3] == 0x01) {
-      // message is from READ command, so returning read value
-      _tryOnData(&_rcvBuffer[7], dp->length);
-    } else if (_rcvBuffer[3] == 0x03) {
-      // message is from WRITE command, so returning written value
+    if (_rcvBuffer[4] != uint8_t(dp->address >> 8) ||
+        _rcvBuffer[5] != uint8_t(dp->address) ||
+        _rcvBuffer[3] != (dp->write ? 0x02 : 0x01)) {
+      _tryOnError(VITO_ERROR);
+      return;
+    }
+    if (_rcvBuffer[2] != 0x01) {
+      if (_rcvBuffer[2] == 0x03 && _rcvLen >= 9)
+        ESP_LOGW("vitoconnect.p300", "Device error at 0x%04X: 0x%02X", dp->address, _rcvBuffer[7]);
+      _tryOnError(VITO_ERROR);
+      return;
+    }
+    if (dp->write) {
+      if (_rcvLen != 8) { _tryOnError(LENGTH); return; }
       _tryOnData(dp->data, dp->length);
     } else {
-      // should not be here
+      if (_rcvLen != size_t(8 + dp->length) || _rcvBuffer[6] != dp->length) {
+        _tryOnError(LENGTH);
+        return;
+      }
+      _tryOnData(&_rcvBuffer[7], dp->length);
     }
-    _state = RECEIVE_ACK;
     return;
-  } else {
-    // not yet complete
   }
 }
 
