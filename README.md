@@ -143,3 +143,28 @@ re-enqueueing a pending datapoint. Unsigned elapsed-time arithmetic handles
 `millis()` rollover.
 
 Local regression checks: `python3 -m unittest discover -s tests -v` (requires g++).
+
+## On-demand sensor report
+
+Give the hub an `id`, then call `id(your_hub).print_sensor_report()` from a
+template button lambda. The report logs a summary and one line per configured
+Optolink sensor (including binary sensors), paced at 150 ms per line. Sensor names
+are registered automatically by code generation. It does not initiate any reads.
+
+Successful replies, protocol error callbacks, last success time and pending state
+are kept **only in RAM**. No preferences, EEPROM or flash writes are performed;
+all statistics reset on reboot. A report can be requested after opening the logs,
+without recording the preceding five minutes. Allow at least six minutes after
+boot to observe the configured five-minute sensors twice.
+
+Each line includes address, name, status, success/error counts, last-success age
+in seconds, interval, pending state and last protocol error code (0 if none).
+`KEINE_ANTWORT` means no successful reply since boot, `FEHLER` means the most
+recent completed request failed, `VERALTET` means the last successful reply is
+older than twice the configured interval, otherwise `OK`. Historical errors stay
+counted even after recovery. Pending requests include time spent in the queue.
+The summary counts sensors with any successful reply, which does not imply all
+are currently healthy. Lines reflect live counters during report output.
+Ages use the 32-bit millisecond timer (wraps after about 49.7 days); an outage
+lasting a full timer cycle is outside its age detection range. Communication
+success does not validate the physical meaning or scaling of a datapoint.

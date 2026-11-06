@@ -53,7 +53,9 @@ class VitoConnect : public uart::UARTDevice, public PollingComponent {
     void update() override;
 
     void set_protocol(std::string protocol) { this->protocol = protocol; }
-    void register_datapoint(Datapoint *datapoint, uint32_t update_interval = 0);
+    void register_datapoint(Datapoint *datapoint, uint32_t update_interval = 0,
+                            const std::string &name = "");
+    void print_sensor_report();
 
     void onData(std::function<void(const uint8_t* data, uint8_t length, Datapoint* dp)> callback);
     void onError(std::function<void(uint8_t, Datapoint*)> callback);
@@ -80,9 +82,14 @@ class VitoConnect : public uart::UARTDevice, public PollingComponent {
     struct ScheduledDatapoint {
       Datapoint* dp;
       PollSchedule schedule;
+      std::string name;
     };
     std::vector<ScheduledDatapoint> _datapoints;
     void schedule_due_();
+    void report_next_();
+    size_t report_index_{0};
+    uint32_t report_last_line_{0};
+    bool report_active_{false};
     std::string protocol;
     struct CbArg {
       CbArg(VitoConnect* vw, ScheduledDatapoint* entry) :

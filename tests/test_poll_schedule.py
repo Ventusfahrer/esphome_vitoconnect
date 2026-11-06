@@ -26,6 +26,15 @@ class PollScheduleTest(unittest.TestCase):
 #include <cstdint>
 #include <vector>
 #include <string>
+#include <cstdarg>
+#include <cstdio>
+extern std::vector<std::string> report_lines;
+inline void test_log(const char*, const char* format, ...) {
+ char buffer[1024]; va_list args; va_start(args, format);
+ vsnprintf(buffer, sizeof(buffer), format, args); va_end(args);
+ report_lines.emplace_back(buffer);
+}
+#define ESP_LOGI(...) test_log(__VA_ARGS__)
 extern uint32_t test_now;
 inline uint32_t millis() { return test_now; }
 #define ESP_LOGD(...) ((void)0)
@@ -91,6 +100,7 @@ class Optolink{protocol} : public Optolink {{ public: using Optolink::Optolink; 
 #include "component/vitoconnect.h"
 #include <cassert>
 uint32_t test_now = 0;
+std::vector<std::string> report_lines;
 using namespace esphome::vitoconnect;
 Optolink* Optolink::instance = nullptr;
 class Value : public Datapoint {
@@ -103,11 +113,14 @@ int main() {
  fast.setAddress(1); slow.setAddress(2); inherited.setAddress(3);
  fast.setLength(1); slow.setLength(1); inherited.setLength(1);
  hub.set_protocol("P300"); hub.set_update_interval(30000);
- hub.register_datapoint(&fast, 10000);
- hub.register_datapoint(&slow, 300000);
+ hub.register_datapoint(&fast, 10000, "Fast");
+ hub.register_datapoint(&slow, 300000, "Slow");
  hub.register_datapoint(&inherited);
  hub.update();  // Safe before setup.
- hub.setup(); hub.loop();
+ hub.setup();
+ hub.print_sensor_report();
+ assert(report_lines[0].find("3 konfiguriert, 0 beantwortet, 3 ohne Antwort") != std::string::npos);
+ hub.loop();
  auto* transport = Optolink::instance;
  assert(transport->sent.size() == 2);
  hub.loop(); assert(transport->sent.size() == 2); // Pending: no duplicates.
@@ -120,7 +133,10 @@ int main() {
  assert(transport->queue[0].address == 1);
  test_now = 30000; hub.loop(); // Fast still pending; inherited is due.
  assert(transport->queue.size() == 2 && transport->queue[1].address == 3);
- transport->finish(true); transport->finish();
+ transport->finish(true);
+ hub.print_sensor_report();
+ assert(report_lines.back().find("Zuletzt Fehler: 1") != std::string::npos);
+ transport->finish();
  hub.loop(); // Failed fast request becomes eligible on its normal cadence.
  assert(transport->queue.size() == 1 && transport->queue[0].address == 1);
  transport->finish();
@@ -133,6 +149,28 @@ int main() {
  rollover.queued(UINT32_MAX - 4999); rollover.complete();
  assert(!rollover.due(4999, 30000));
  assert(rollover.due(5000, 30000));
+ report_lines.clear();
+ hub.print_sensor_report();
+ assert(report_lines[0].find("3 konfiguriert, 3 beantwortet, 0 ohne Antwort") != std::string::npos);
+ for (int i = 0; i < 4; ++i) { test_now += 150; hub.loop(); }
+ assert(report_lines.size() == 6);
+ assert(report_lines[2].find("0x0001 Fast: OK; OK=3 Fehler=1") != std::string::npos);
+ assert(report_lines[3].find("0x0002 Slow: OK; OK=2 Fehler=0") != std::string::npos);
+ assert(report_lines[4].find("0x0003") != std::string::npos);
+ assert(report_lines[5] == "Sensorpruefung beendet");
+ PollSchedule stats;
+ assert(std::string(stats.status(0, 10000)) == "KEINE_ANTWORT");
+ stats.queued(0); stats.received(0);
+ assert(stats.successes == 1 && !stats.pending);
+ assert(std::string(stats.status(20000, 10000)) == "OK");
+ assert(std::string(stats.status(20001, 10000)) == "VERALTET");
+ stats.failed(7);
+ assert(stats.errors == 1 && stats.last_error == 7);
+ assert(std::string(stats.status(20002, 10000)) == "FEHLER");
+ stats.received(20003);
+ assert(stats.errors == 1 && stats.successes == 2 && !stats.last_failed);
+ stats.successes = UINT32_MAX; stats.received(20004); assert(stats.successes == UINT32_MAX);
+ stats.errors = UINT32_MAX; stats.failed(8); assert(stats.errors == UINT32_MAX);
  VitoConnect invalid; invalid.set_protocol("invalid"); invalid.setup(); invalid.loop();
 }
 ''')

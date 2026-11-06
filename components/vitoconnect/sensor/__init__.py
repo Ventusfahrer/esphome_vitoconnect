@@ -1,7 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import sensor
-from esphome.const import CONF_UPDATE_INTERVAL, CONF_ADDRESS, CONF_LENGTH
+from esphome.const import CONF_NAME, CONF_UPDATE_INTERVAL, CONF_ADDRESS, CONF_LENGTH
 
 from .. import CONF_VITOCONNECT_ID, VitoConnect, vitoconnect_ns
 
@@ -29,6 +29,6 @@ async def to_code(config):
     # Add sensor to component hub (VitoConnect)
     hub = await cg.get_variable(config[CONF_VITOCONNECT_ID])
     if CONF_UPDATE_INTERVAL in config:
-        cg.add(hub.register_datapoint(var, config[CONF_UPDATE_INTERVAL]))
+        cg.add(hub.register_datapoint(var, config[CONF_UPDATE_INTERVAL], config.get(CONF_NAME, "")))
     else:
-        cg.add(hub.register_datapoint(var))
+        cg.add(hub.register_datapoint(var, 0, config.get(CONF_NAME, "")))
