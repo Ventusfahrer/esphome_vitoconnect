@@ -100,3 +100,46 @@ Copyright (c) 2025 Philipp Danner
 [Bert Melis]: https://github.com/bertmelis
 [Philipp Hack]: https://github.com/phha
 [GWG]: README_GWG.md
+## Per-sensor polling intervals
+
+Both `sensor` and `binary_sensor` accept an optional `update_interval`:
+
+```yaml
+vitoconnect:
+  uart_id: uart_vitoconnect
+  protocol: P300
+  update_interval: 30s  # Default for datapoints without their own interval.
+
+sensor:
+  - platform: vitoconnect
+    name: Thermal heating energy
+    address: 0x1640
+    length: 4
+    update_interval: 5min
+    unit_of_measurement: kWh
+    filters:
+      - multiply: 0.1
+
+binary_sensor:
+  - platform: vitoconnect
+    name: Compressor running
+    address: 0x0480
+    update_interval: 10s
+```
+
+Intervals must be positive durations in milliseconds or greater; `never` is not
+supported. All datapoints are initially due after setup. Each subsequent interval
+runs from the last successful enqueue, not from response completion. Sensors
+without an override inherit the hub interval. The loop checks due datapoints,
+so a 10-second sensor works with a 30-second hub interval.
+
+Only one request per datapoint may be outstanding. Full queues are retried as
+space becomes available; datapoints are not silently dropped. Successful replies
+and protocol error callbacks both release the pending flag. Missed intervals do
+not generate catch-up requests. Communication speed and protocol timeouts can
+delay a measurement beyond its configured interval. The scheduler does not change
+protocol timeout/recovery behavior; it waits for the protocol callback before
+re-enqueueing a pending datapoint. Unsigned elapsed-time arithmetic handles
+`millis()` rollover.
+
+Local regression checks: `python3 -m unittest discover -s tests -v` (requires g++).

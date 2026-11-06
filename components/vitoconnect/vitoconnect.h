@@ -19,6 +19,9 @@
 
 #pragma once
 
+#include <cstdint>
+#include <vector>
+
 #include "esphome/core/component.h"
 #include "esphome/components/uart/uart.h"
 #include "esphome/components/uart/uart_component.h"
@@ -29,6 +32,7 @@
 #include "vitoconnect_optolinkKW.h"
 #include "vitoconnect_optolinkGWG.h"
 #include "vitoconnect_datapoint.h"
+#include "vitoconnect_poll_schedule.h"
 
 using namespace std;
 
@@ -49,7 +53,7 @@ class VitoConnect : public uart::UARTDevice, public PollingComponent {
     void update() override;
 
     void set_protocol(std::string protocol) { this->protocol = protocol; }
-    void register_datapoint(Datapoint *datapoint);
+    void register_datapoint(Datapoint *datapoint, uint32_t update_interval = 0);
 
     void onData(std::function<void(const uint8_t* data, uint8_t length, Datapoint* dp)> callback);
     void onError(std::function<void(uint8_t, Datapoint*)> callback);
@@ -72,15 +76,22 @@ class VitoConnect : public uart::UARTDevice, public PollingComponent {
   protected:
 
   private:
-    Optolink* _optolink;
-    std::vector<Datapoint*> _datapoints;
+    Optolink* _optolink{nullptr};
+    struct ScheduledDatapoint {
+      Datapoint* dp;
+      PollSchedule schedule;
+    };
+    std::vector<ScheduledDatapoint> _datapoints;
+    void schedule_due_();
     std::string protocol;
     struct CbArg {
-      CbArg(VitoConnect* vw, Datapoint* d) :
+      CbArg(VitoConnect* vw, ScheduledDatapoint* entry) :
         v(vw),
-        dp(d) {}
+        dp(entry->dp),
+        scheduled(entry) {}
       VitoConnect* v;
       Datapoint* dp;
+      ScheduledDatapoint* scheduled;
     };
     static void _onData(uint8_t* data, uint8_t len, void* arg);
     static void _onError(uint8_t error, void* arg);

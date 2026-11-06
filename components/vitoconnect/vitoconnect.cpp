@@ -56,30 +56,43 @@ void VitoConnect::setup() {
     }
 }
 
-void VitoConnect::register_datapoint(Datapoint *datapoint) {
+void VitoConnect::register_datapoint(Datapoint *datapoint, uint32_t update_interval) {
     ESP_LOGD(TAG, "Adding datapoint with address %x and length %d", datapoint->getAddress(), datapoint->getLength());
-    this->_datapoints.push_back(datapoint);
+    ScheduledDatapoint entry;
+    entry.dp = datapoint;
+    entry.schedule.interval = update_interval;
+    this->_datapoints.push_back(entry);
 }
 
 void VitoConnect::loop() {
+    if (!_optolink) return;
     _optolink->loop();
+    schedule_due_();
 }
 
 void VitoConnect::update() {
-  // This will be called every "update_interval" milliseconds.
-  ESP_LOGD(TAG, "Schedule sensor update");
-  
-  for (Datapoint* dp : this->_datapoints) {
-      CbArg* arg = new CbArg(this, dp);   
-      if (_optolink->read(dp->getAddress(), dp->getLength(), reinterpret_cast<void*>(arg))) {
-      } else {
-          delete arg;
+    schedule_due_();
+}
+
+void VitoConnect::schedule_due_() {
+    if (!_optolink) return;
+    const uint32_t now = millis();
+    for (auto &entry : _datapoints) {
+      if (!entry.schedule.due(now, this->get_update_interval())) continue;
+      CbArg* arg = new CbArg(this, &entry);
+      if (!_optolink->read(entry.dp->getAddress(), entry.dp->getLength(),
+                           reinterpret_cast<void*>(arg))) {
+        delete arg;
+        // Queue full: leave this request due and retry after the protocol drains it.
+        break;
       }
-  }
+      entry.schedule.queued(now);
+    }
 }
 
 void VitoConnect::_onData(uint8_t* data, uint8_t len, void* arg) {
   CbArg* cbArg = reinterpret_cast<CbArg*>(arg);
+  cbArg->scheduled->schedule.complete();
   cbArg->dp->decode(data, len, cbArg->dp);
   delete cbArg;
 }
@@ -87,6 +100,7 @@ void VitoConnect::_onData(uint8_t* data, uint8_t len, void* arg) {
 void VitoConnect::_onError(uint8_t error, void* arg) {
   ESP_LOGD(TAG, "Error received: %d", error);
   CbArg* cbArg = reinterpret_cast<CbArg*>(arg);
+  cbArg->scheduled->schedule.complete();
   if (cbArg->v->_onErrorCb) cbArg->v->_onErrorCb(error, cbArg->dp);
   delete cbArg;
 }
