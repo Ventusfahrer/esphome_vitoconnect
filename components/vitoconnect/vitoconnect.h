@@ -56,6 +56,7 @@ class VitoConnect : public uart::UARTDevice, public PollingComponent {
     void register_datapoint(Datapoint *datapoint, uint32_t update_interval = 0,
                             const std::string &name = "");
     void print_sensor_report();
+    bool write_datapoint(Datapoint *datapoint, uint8_t *data);
 
     void onData(std::function<void(const uint8_t* data, uint8_t length, Datapoint* dp)> callback);
     void onError(std::function<void(uint8_t, Datapoint*)> callback);
@@ -99,6 +100,7 @@ class VitoConnect : public uart::UARTDevice, public PollingComponent {
       VitoConnect* v;
       Datapoint* dp;
       ScheduledDatapoint* scheduled;
+      bool writing{false};
     };
     static void _onData(uint8_t* data, uint8_t len, void* arg);
     static void _onError(uint8_t error, void* arg);

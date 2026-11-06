@@ -65,6 +65,21 @@ void VitoConnect::register_datapoint(Datapoint *datapoint, uint32_t update_inter
     this->_datapoints.push_back(entry);
 }
 
+bool VitoConnect::write_datapoint(Datapoint *datapoint, uint8_t *data) {
+    if (!_optolink || protocol != "P300") return false;
+    for (auto &entry : _datapoints) {
+      if (entry.dp != datapoint) continue;
+      CbArg *arg = new CbArg(this, &entry);
+      arg->writing = true;
+      if (!_optolink->write(datapoint->getAddress(), datapoint->getLength(), data, arg)) {
+        delete arg;
+        return false;
+      }
+      return true;
+    }
+    return false;
+}
+
 void VitoConnect::loop() {
     if (!_optolink) return;
     _optolink->loop();
@@ -135,6 +150,12 @@ void VitoConnect::report_next_() {
 
 void VitoConnect::_onData(uint8_t* data, uint8_t len, void* arg) {
   CbArg* cbArg = reinterpret_cast<CbArg*>(arg);
+  if (cbArg->writing) {
+    // A write acknowledgement echoes the payload; only a real read confirms state.
+    cbArg->scheduled->schedule.started = false;
+    delete cbArg;
+    return;
+  }
   cbArg->scheduled->schedule.received(millis());
   cbArg->dp->decode(data, len, cbArg->dp);
   delete cbArg;
@@ -143,7 +164,12 @@ void VitoConnect::_onData(uint8_t* data, uint8_t len, void* arg) {
 void VitoConnect::_onError(uint8_t error, void* arg) {
   ESP_LOGD(TAG, "Error received: %d", error);
   CbArg* cbArg = reinterpret_cast<CbArg*>(arg);
-  cbArg->scheduled->schedule.failed(error);
+  if (cbArg->writing) {
+    ESP_LOGW(TAG, "Write failed at 0x%04X: %u", cbArg->dp->getAddress(), error);
+    cbArg->scheduled->schedule.started = false;
+  } else {
+    cbArg->scheduled->schedule.failed(error);
+  }
   if (cbArg->v->_onErrorCb) cbArg->v->_onErrorCb(error, cbArg->dp);
   delete cbArg;
 }

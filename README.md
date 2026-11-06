@@ -168,3 +168,7 @@ are currently healthy. Lines reflect live counters during report output.
 Ages use the 32-bit millisecond timer (wraps after about 49.7 days); an outage
 lasting a full timer cycle is outside its age detection range. Communication
 success does not validate the physical meaning or scaling of a datapoint.
+
+## Room setpoint number (local addition)
+
+`number.vitoconnect` supports the HK1 normal room setpoint (`address: 0x2000`) with signed LE16 tenths of °C, range 10–30 °C and step 1 °C. It uses the existing P300 write queue and polls every 60s by default (`update_interval` may be set). Write acknowledgements trigger readback; only read responses publish state. No startup writes or restored setpoint are used. Failed/full-queue writes log a warning without publishing the requested value. Other protocols reject writes. This addition has been tested with a fake transport; hardware write validation is pending.
