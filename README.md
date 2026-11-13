@@ -219,3 +219,14 @@ This accommodates a running controller left in P300 across an ESP reboot.
 The timer does not prove controller readiness; if both devices start together
 and the controller remains silent beyond the wait, one probe can still occur
 during its boot. Hardware validation remains pending.
+
+### Communication diagnostics
+
+`get_communication_state()` exposes stable values for template text sensors:
+`not_initialized`, `startup_wait`, `waiting_for_05`, `safety_wait`, `paused`,
+`connecting`, `communicating`, `communication_error`.
+`is_communication_active()` is true after a validated datapoint response and
+false after an error or pause. These describe serial communication, not heat
+pump readiness. Between requests, the last confirmed status is retained;
+a power loss is not detected until a transaction fails. Explicit pause APIs
+still work for configurations that need manual control.

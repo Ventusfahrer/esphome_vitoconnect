@@ -58,6 +58,8 @@ class VitoConnect : public uart::UARTDevice, public PollingComponent {
     void print_sensor_report();
     void set_communication_paused(bool paused);
     bool is_communication_paused() const { return communication_paused_; }
+    const char *get_communication_state() const;
+    bool is_communication_active() const { return !communication_paused_ && communication_active_; }
     void set_start_paused(bool paused) { communication_paused_ = paused; }
     void set_pause_on_timeout(bool enabled) { pause_on_timeout_ = enabled; }
     void set_recovery_delay(uint32_t delay) { recovery_delay_ = delay; }
@@ -86,6 +88,8 @@ class VitoConnect : public uart::UARTDevice, public PollingComponent {
   private:
     Optolink* _optolink{nullptr};
     bool communication_paused_{false};
+    bool communication_active_{false};
+    bool communication_error_{false};
     bool pause_on_timeout_{false};
     bool timeout_pause_pending_{false};
     uint32_t recovery_delay_{0};

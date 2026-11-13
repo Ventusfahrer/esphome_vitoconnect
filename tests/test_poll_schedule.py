@@ -280,12 +280,16 @@ int main() {
  guarded.set_protocol("P300"); guarded.set_update_interval(10000);
  guarded.set_start_paused(true); guarded.set_pause_on_timeout(true);
  guarded.register_datapoint(&first); guarded.register_datapoint(&second);
+ assert(std::string(guarded.get_communication_state()) == "not_initialized");
  guarded.setup(); transport = Optolink::instance;
+ assert(std::string(guarded.get_communication_state()) == "paused");
  guarded.loop(); guarded.update();
  assert(guarded.is_communication_paused());
  assert(transport->loops == 0 && transport->queue.empty());
  assert(!guarded.write_datapoint(&first, confirmed));
  guarded.set_communication_paused(false); guarded.loop();
+ assert(std::string(guarded.get_communication_state()) == "connecting");
+ assert(!guarded.is_communication_active());
  assert(transport->queue.size() == 2);
  transport->timeout_next_loop = true; guarded.loop();
  assert(guarded.is_communication_paused() && transport->queue.empty());
@@ -294,9 +298,13 @@ int main() {
  guarded.loop(); guarded.update();
  assert(transport->loops == loops_before && transport->queue.empty());
  guarded.set_communication_paused(false); guarded.loop();
+ assert(std::string(guarded.get_communication_state()) == "connecting");
+ assert(!guarded.is_communication_active());
  assert(transport->queue.size() == 2);
  transport->finish(); transport->finish();
  assert(first.count == 1 && second.count == 1);
+ assert(std::string(guarded.get_communication_state()) == "communicating");
+ assert(guarded.is_communication_active());
  // Automatic recovery needs a full stream of unsolicited enquiries, not time alone.
  VitoConnect automatic;
  Value automatic_value; automatic_value.setAddress(12); automatic_value.setLength(1);
@@ -309,8 +317,10 @@ int main() {
  test_now = UINT32_MAX - 99999; // Exercise timer rollover during safety wait.
  automatic.loop();
  assert(automatic.is_communication_paused() && transport->loops == 0);
+ assert(std::string(automatic.get_communication_state()) == "startup_wait");
  for (int i=0; i<60; ++i) {
    automatic.rx_count = 1; automatic.loop(); test_now += 2000;
+   assert(std::string(automatic.get_communication_state()) == "safety_wait");
    assert(automatic.is_communication_paused());
  }
  automatic.loop(); // Delay expired, but no new 05: still silent.
@@ -321,6 +331,8 @@ int main() {
  automatic.loop(); assert(transport->queue.size() == 1);
  transport->timeout_next_loop = true; automatic.loop();
  assert(automatic.is_communication_paused() && transport->queue.empty());
+ assert(std::string(automatic.get_communication_state()) == "waiting_for_05");
+ assert(!automatic.is_communication_active());
  automatic.rx_count = 1; automatic.loop();
  test_now += 6000; automatic.rx_count = 1; automatic.loop(); // gap restarts timer
  for (int i=0; i<59; ++i) {
@@ -365,6 +377,23 @@ int main() {
  test_now = 119000; cold.rx_count = 1; cold.loop();
  test_now = 130000; cold.loop(); // Gap: restart passive observation, never probe.
  assert(cold.is_communication_paused() && transport->startup_probes == 0);
+ assert(std::string(cold.get_communication_state()) == "waiting_for_05");
+ // Valid data, protocol errors, cancellation and manual pause are distinct.
+ VitoConnect status_hub;
+ Value status_value; status_value.setAddress(14); status_value.setLength(1);
+ status_hub.set_protocol("P300"); status_hub.set_update_interval(10000);
+ status_hub.register_datapoint(&status_value); status_hub.setup();
+ transport = Optolink::instance;
+ status_hub.loop(); transport->finish();
+ assert(status_hub.is_communication_active());
+ test_now += 10000; status_hub.loop(); transport->finish(true);
+ assert(!status_hub.is_communication_active());
+ assert(std::string(status_hub.get_communication_state()) == "communication_error");
+ test_now += 10000; status_hub.loop(); transport->finish();
+ assert(std::string(status_hub.get_communication_state()) == "communicating");
+ status_hub.set_communication_paused(true);
+ assert(!status_hub.is_communication_active());
+ assert(std::string(status_hub.get_communication_state()) == "paused");
  VitoConnect invalid; invalid.set_protocol("invalid"); invalid.setup(); invalid.loop();
 }
 ''')

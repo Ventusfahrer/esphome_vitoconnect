@@ -84,6 +84,18 @@ bool VitoConnect::write_datapoint(Datapoint *datapoint, uint8_t *data) {
     return false;
 }
 
+const char *VitoConnect::get_communication_state() const {
+    if (!_optolink) return "not_initialized";
+    if (communication_paused_) {
+      if (!recovery_armed_) return "paused";
+      if (enquiry_seen_ && uint32_t(millis() - last_enquiry_) <= 5000)
+        return "safety_wait";
+      return startup_probe_allowed_ ? "startup_wait" : "waiting_for_05";
+    }
+    if (communication_error_) return "communication_error";
+    return communication_active_ ? "communicating" : "connecting";
+}
+
 void VitoConnect::set_communication_paused(bool paused) {
     timeout_pause_pending_ = false;
     recovery_armed_ = false;
@@ -91,6 +103,8 @@ void VitoConnect::set_communication_paused(bool paused) {
     enquiry_seen_ = false;
     if (communication_paused_ == paused) return;
     communication_paused_ = paused;
+    communication_active_ = false;
+    communication_error_ = false;
     if (_optolink) {
       if (paused) {
         // Finish bytes already handed to UART before declaring the pause active.
@@ -242,6 +256,8 @@ void VitoConnect::report_next_() {
 
 void VitoConnect::_onData(uint8_t* data, uint8_t len, void* arg) {
   CbArg* cbArg = reinterpret_cast<CbArg*>(arg);
+  cbArg->v->communication_active_ = true;
+  cbArg->v->communication_error_ = false;
   if (cbArg->writing) {
     // A write acknowledgement echoes the payload; only a real read confirms state.
     cbArg->scheduled->schedule.started = false;
@@ -261,6 +277,8 @@ void VitoConnect::_onError(uint8_t error, void* arg) {
     delete cbArg;
     return;
   }
+  cbArg->v->communication_active_ = false;
+  cbArg->v->communication_error_ = true;
   if (error == TIMEOUT && cbArg->v->pause_on_timeout_)
     cbArg->v->timeout_pause_pending_ = true;
   ESP_LOGD(TAG, "Error received: %d", error);
