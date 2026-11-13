@@ -84,7 +84,7 @@ class Number {
 #include <cstdint>
 #include <vector>
 namespace esphome { namespace vitoconnect {
-enum { CANCELLED = 5 };
+enum { TIMEOUT = 0, CANCELLED = 5 };
 class Optolink {
  public:
  struct Request { uint16_t address; void* arg; };
@@ -98,7 +98,17 @@ class Optolink {
  void onData(decltype(data) cb) { data = cb; }
  void onError(decltype(error) cb) { error = cb; }
  unsigned begins = 0, loops = 0;
- void begin() { ++begins; } void loop() { ++loops; }
+ bool timeout_next_loop = false;
+ void begin() { ++begins; }
+ void loop() {
+   ++loops;
+   if (timeout_next_loop && !queue.empty()) {
+     timeout_next_loop = false;
+     // Match real transport: callback first, then pop the timed-out request.
+     error(TIMEOUT, queue.front().arg);
+     queue.erase(queue.begin());
+   }
+ }
  void cancel_pending() {
    while (!queue.empty()) {
      auto request = queue.front(); queue.erase(queue.begin());
@@ -259,6 +269,31 @@ int main() {
  writer.set_communication_paused(false); assert(transport->begins == 2);
  writer.loop(); assert(transport->queue.size() == 1);
  transport->finish(true);
+ // Boot silence and timeout latch: cancellation must wait for callback unwind.
+ VitoConnect guarded;
+ Value first, second;
+ first.setAddress(10); first.setLength(1);
+ second.setAddress(11); second.setLength(1);
+ guarded.set_protocol("P300"); guarded.set_update_interval(10000);
+ guarded.set_start_paused(true); guarded.set_pause_on_timeout(true);
+ guarded.register_datapoint(&first); guarded.register_datapoint(&second);
+ guarded.setup(); transport = Optolink::instance;
+ guarded.loop(); guarded.update();
+ assert(guarded.is_communication_paused());
+ assert(transport->loops == 0 && transport->queue.empty());
+ assert(!guarded.write_datapoint(&first, confirmed));
+ guarded.set_communication_paused(false); guarded.loop();
+ assert(transport->queue.size() == 2);
+ transport->timeout_next_loop = true; guarded.loop();
+ assert(guarded.is_communication_paused() && transport->queue.empty());
+ loops_before = transport->loops;
+ test_now += 1000000;
+ guarded.loop(); guarded.update();
+ assert(transport->loops == loops_before && transport->queue.empty());
+ guarded.set_communication_paused(false); guarded.loop();
+ assert(transport->queue.size() == 2);
+ transport->finish(); transport->finish();
+ assert(first.count == 1 && second.count == 1);
  VitoConnect invalid; invalid.set_protocol("invalid"); invalid.setup(); invalid.loop();
 }
 ''')

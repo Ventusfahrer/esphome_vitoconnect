@@ -50,6 +50,8 @@ void VitoConnect::setup() {
       
       // set initial state
       _optolink->begin();
+      if (communication_paused_)
+        ESP_LOGI(TAG, "Optolink starts PAUSED (TX disabled); manual release required");
 
     } else {
       ESP_LOGW(TAG, "Not able to initialize VitoConnect");
@@ -81,6 +83,7 @@ bool VitoConnect::write_datapoint(Datapoint *datapoint, uint8_t *data) {
 }
 
 void VitoConnect::set_communication_paused(bool paused) {
+    timeout_pause_pending_ = false;
     if (communication_paused_ == paused) return;
     communication_paused_ = paused;
     if (_optolink) {
@@ -105,7 +108,13 @@ void VitoConnect::loop() {
       for (int i = 0; i < count; ++i) this->read();
     } else {
       _optolink->loop();
-      schedule_due_();
+      // Defer cancellation until the protocol callback has popped its request.
+      if (timeout_pause_pending_) {
+        ESP_LOGW(TAG, "Optolink timeout: pausing TX until manual release");
+        set_communication_paused(true);
+      } else {
+        schedule_due_();
+      }
     }
     report_next_();
 }
@@ -192,6 +201,8 @@ void VitoConnect::_onError(uint8_t error, void* arg) {
     delete cbArg;
     return;
   }
+  if (error == TIMEOUT && cbArg->v->pause_on_timeout_)
+    cbArg->v->timeout_pause_pending_ = true;
   ESP_LOGD(TAG, "Error received: %d", error);
   if (cbArg->writing) {
     ESP_LOGW(TAG, "Write failed at 0x%04X: %u", cbArg->dp->getAddress(), error);
