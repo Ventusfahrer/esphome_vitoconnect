@@ -61,6 +61,7 @@ class OptolinkP300 : public Optolink {
    */
   void begin();
   void begin_after_enquiry() override;
+  void begin_startup_probe() override;
 
   /**
    * @brief Method to keep the Optolink running.
@@ -94,6 +95,7 @@ class OptolinkP300 : public Optolink {
   void _receive();
   void _receiveAck();
   uint32_t _lastMillis;
+  bool _single_reset{false};
   bool _write;
   uint8_t _rcvBuffer[MAX_DP_LENGTH + 8];
   size_t _rcvBufferLen;

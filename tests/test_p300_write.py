@@ -109,6 +109,19 @@ int main() {
  link.begin_after_enquiry(); link.loop();
  assert(uart.tx == std::vector<uint8_t>({0x16,0,0})); // No preceding reset byte.
  link.cancel_pending(); assert(failures == 5);
+ test_now = 10000;
+ link.begin_startup_probe(); uart.tx.clear(); link.loop();
+ assert(uart.tx == std::vector<uint8_t>({4})); uart.tx.clear();
+ assert(link.read(0x2000,2));
+ test_now += 2000; link.loop(); // 05 period is about 2s; do not retry at 1s.
+ assert(uart.tx.empty() && failures == 5);
+ test_now += 3001; link.loop();
+ assert(uart.tx.empty() && failures == 6 && last_error == TIMEOUT);
+ link.loop(); assert(uart.tx.empty());
+ // Successful single probe proceeds from 05 directly into initialization.
+ link.begin_startup_probe(); link.loop(); uart.tx.clear();
+ uart.rx.push_back(5); link.loop(); link.loop();
+ assert(uart.tx == std::vector<uint8_t>({0x16,0,0}));
 }
 ''')
             component = ROOT / 'components/vitoconnect'

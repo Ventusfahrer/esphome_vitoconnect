@@ -93,7 +93,9 @@ class VitoConnect : public uart::UARTDevice, public PollingComponent {
     bool enquiry_seen_{false};
     uint32_t first_enquiry_{0};
     uint32_t last_enquiry_{0};
-    void arm_recovery_();
+    bool startup_probe_allowed_{false};
+    uint32_t recovery_started_{0};
+    void arm_recovery_(bool startup = false);
     void receive_paused_();
     struct ScheduledDatapoint {
       Datapoint* dp;

@@ -53,10 +53,17 @@ OptolinkP300::OptolinkP300(uart::UARTDevice* uart) :
   _rcvLen(0) {}
 
 void OptolinkP300::begin() {
+  _single_reset = false;
   _state = RESET;
 }
 
+void OptolinkP300::begin_startup_probe() {
+  begin();
+  _single_reset = true;
+}
+
 void OptolinkP300::begin_after_enquiry() {
+  _single_reset = false;
   // A fresh unsolicited 0x05 already establishes KW readiness; no 0x04 needed.
   _lastMillis = millis();
   _rcvBufferLen = 0;
@@ -118,7 +125,14 @@ void OptolinkP300::_resetAck() {
     _lastMillis = millis();
     _state = INIT;
   } else {
-    if (millis() - _lastMillis > 1000) {  // try again every 0,5sec
+    if (_single_reset) {
+      if (uint32_t(millis() - _lastMillis) > 5000) {
+        // Never repeat 04 during a guarded startup probe.
+        _state = UNDEF;
+        _lastMillis = millis();
+        if (_queue.size() > 0) _tryOnError(TIMEOUT);
+      }
+    } else if (uint32_t(millis() - _lastMillis) > 1000) {
       _state = RESET;
     }
   }

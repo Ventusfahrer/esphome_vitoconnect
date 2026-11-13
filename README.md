@@ -193,7 +193,7 @@ With `recovery_delay`, automatic startup/timeout pauses wait passively for
 unsolicited `0x05` enquiries. The delay starts at the first enquiry and must
 elapse with regular enquiries. A gap exceeding 5 seconds or any other received
 byte restarts that observation. Resume requires a fresh enquiry after the delay;
-a timer alone cannot resume communication. P300 initialization then sends
+a timer alone cannot resume this passive path. P300 initialization then sends
 `16 00 00` directly, without a preceding `04` reset. Failed communication
 returns to the pause through the next request timeout. Recovery is supported
 only for P300; other protocols retain manual release.
@@ -208,3 +208,14 @@ This cannot predict a controller power outage: an active transaction may remain
 until its timeout is detected. Regular `05` enquiries establish serial-interface
 readiness, not completion of the entire controller startup. The 120-second delay
 is an initial conservative setting, not yet validated on the user's controller.
+
+ESP-only reboot fallback: If no `05` was received during the initial
+`recovery_delay` after component setup, exactly one reset probe (`04`) is
+allowed. It waits up to 5 seconds for `05`, then initializes P300 normally.
+If the probe fails, the timeout pause returns to passive waiting; no further
+timer-triggered probe is armed until the next ESP startup. Receiving any `05`
+during the initial wait disables this fallback and selects the passive path.
+This accommodates a running controller left in P300 across an ESP reboot.
+The timer does not prove controller readiness; if both devices start together
+and the controller remains silent beyond the wait, one probe can still occur
+during its boot. Hardware validation remains pending.

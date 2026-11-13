@@ -52,7 +52,7 @@ void VitoConnect::setup() {
       _optolink->begin();
       if (communication_paused_) {
         ESP_LOGI(TAG, "Optolink starts PAUSED (TX disabled)");
-        arm_recovery_();
+        arm_recovery_(true);
       }
 
     } else {
@@ -87,6 +87,7 @@ bool VitoConnect::write_datapoint(Datapoint *datapoint, uint8_t *data) {
 void VitoConnect::set_communication_paused(bool paused) {
     timeout_pause_pending_ = false;
     recovery_armed_ = false;
+    startup_probe_allowed_ = false;
     enquiry_seen_ = false;
     if (communication_paused_ == paused) return;
     communication_paused_ = paused;
@@ -104,8 +105,10 @@ void VitoConnect::set_communication_paused(bool paused) {
     ESP_LOGI(TAG, "Optolink communication %s", paused ? "PAUSED (TX disabled)" : "RESUMED (new handshake)");
 }
 
-void VitoConnect::arm_recovery_() {
+void VitoConnect::arm_recovery_(bool startup) {
     recovery_armed_ = recovery_delay_ > 0 && protocol == "P300";
+    startup_probe_allowed_ = startup && recovery_armed_;
+    recovery_started_ = millis();
     enquiry_seen_ = false;
     if (recovery_armed_)
       ESP_LOGI(TAG, "Passive recovery: waiting for 05, then %lu ms of regular enquiries",
@@ -129,6 +132,7 @@ void VitoConnect::receive_paused_() {
         fresh_enquiry = false;
         continue;
       }
+      startup_probe_allowed_ = false; // Once 05 is seen, use only passive recovery.
       if (!enquiry_seen_) {
         first_enquiry_ = now;
         enquiry_seen_ = true;
@@ -145,6 +149,14 @@ void VitoConnect::receive_paused_() {
       communication_paused_ = false;
       _optolink->begin_after_enquiry();
       ESP_LOGI(TAG, "Optolink automatic recovery: safety wait complete, P300 init without reset");
+    } else if (recovery_armed_ && startup_probe_allowed_ &&
+               uint32_t(now - recovery_started_) >= recovery_delay_) {
+      // ESP-only reboot may leave the controller in P300 with no unsolicited 05.
+      startup_probe_allowed_ = false;
+      recovery_armed_ = false;
+      communication_paused_ = false;
+      _optolink->begin_startup_probe();
+      ESP_LOGI(TAG, "Optolink startup: no 05 after safety wait; single reset probe (no retries)");
     }
 }
 

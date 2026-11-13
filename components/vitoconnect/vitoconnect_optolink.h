@@ -182,6 +182,7 @@ class Optolink {
    */
   virtual void begin() = 0;
   virtual void begin_after_enquiry() { begin(); }
+  virtual void begin_startup_probe() { begin(); }
 
   // Cancel queued requests through their callbacks so owners can release state.
   void cancel_pending();

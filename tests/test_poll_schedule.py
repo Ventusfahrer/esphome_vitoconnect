@@ -98,10 +98,11 @@ class Optolink {
  explicit Optolink(void*) { instance = this; }
  void onData(decltype(data) cb) { data = cb; }
  void onError(decltype(error) cb) { error = cb; }
- unsigned begins = 0, loops = 0, passive_begins = 0;
+ unsigned begins = 0, loops = 0, passive_begins = 0, startup_probes = 0;
  bool timeout_next_loop = false;
  void begin() { ++begins; }
  void begin_after_enquiry() { ++passive_begins; }
+ void begin_startup_probe() { ++startup_probes; }
  void loop() {
    ++loops;
    if (timeout_next_loop && !queue.empty()) {
@@ -303,6 +304,7 @@ int main() {
  automatic.set_start_paused(true); automatic.set_pause_on_timeout(true);
  automatic.set_recovery_delay(120000);
  automatic.register_datapoint(&automatic_value);
+ test_now = UINT32_MAX - 99999;
  automatic.setup(); transport = Optolink::instance;
  test_now = UINT32_MAX - 99999; // Exercise timer rollover during safety wait.
  automatic.loop();
@@ -339,6 +341,30 @@ int main() {
    test_now += 2000; automatic.rx_count = 1; automatic.loop();
  }
  assert(automatic.is_communication_paused() && transport->passive_begins == 2);
+ // ESP-only boot: one probe after the full initial wait, no recurring probes.
+ VitoConnect warm;
+ Value warm_value; warm_value.setAddress(13); warm_value.setLength(1);
+ warm.set_protocol("P300"); warm.set_update_interval(10000);
+ warm.set_start_paused(true); warm.set_pause_on_timeout(true);
+ warm.set_recovery_delay(120000); warm.register_datapoint(&warm_value);
+ test_now = 0; warm.setup(); transport = Optolink::instance;
+ test_now = 119999; warm.loop();
+ assert(warm.is_communication_paused() && transport->startup_probes == 0);
+ test_now = 120000; warm.loop();
+ assert(!warm.is_communication_paused() && transport->startup_probes == 1);
+ warm.loop(); assert(transport->queue.size() == 1);
+ transport->timeout_next_loop = true; warm.loop();
+ assert(warm.is_communication_paused());
+ test_now += 1000000; warm.loop();
+ assert(warm.is_communication_paused() && transport->startup_probes == 1);
+ // A first 05 before expiry permanently suppresses the startup probe.
+ VitoConnect cold;
+ cold.set_protocol("P300"); cold.set_start_paused(true);
+ cold.set_pause_on_timeout(true); cold.set_recovery_delay(120000);
+ test_now = 0; cold.setup(); transport = Optolink::instance;
+ test_now = 119000; cold.rx_count = 1; cold.loop();
+ test_now = 130000; cold.loop(); // Gap: restart passive observation, never probe.
+ assert(cold.is_communication_paused() && transport->startup_probes == 0);
  VitoConnect invalid; invalid.set_protocol("invalid"); invalid.setup(); invalid.loop();
 }
 ''')
