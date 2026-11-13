@@ -174,20 +174,37 @@ success does not validate the physical meaning or scaling of a datapoint.
 `number.vitoconnect` supports the HK1 normal room setpoint (`address: 0x2000`) with signed LE16 tenths of °C, range 10–30 °C and step 1 °C. It uses the existing P300 write queue and polls every 60s by default (`update_interval` may be set). Write acknowledgements trigger readback; only read responses publish state. No startup writes or restored setpoint are used. Failed/full-queue writes log a warning without publishing the requested value. Other protocols reject writes. This addition has been tested with a fake transport; hardware write validation is pending.
 
 
-### Manual transmit interlock for startup diagnosis
+### Startup protection and passive P300 recovery
 
-The optional hub settings `start_paused: true` and `pause_on_timeout: true`
-keep Optolink silent at ESP startup and latch a transmit pause after a request
-TIMEOUT, respectively. Both default to false for existing configurations.
-Release the pause explicitly with `set_communication_paused(false)` only when
-the heating controller has finished starting. A template switch can display
-`is_communication_paused()` and call the setter in its on/off actions. Use
-`restore_mode: ALWAYS_ON` when every ESP reboot must start with that switch on.
+Optional hub configuration:
 
+```yaml
+vitoconnect:
+  # Keep your existing id, uart_id, protocol and polling interval.
+  protocol: P300
+  start_paused: true
+  pause_on_timeout: true
+  recovery_delay: 120s
+```
+
+`start_paused` and `pause_on_timeout` default to false. Without `recovery_delay`,
+a pause requires explicit release with `set_communication_paused(false)`.
+With `recovery_delay`, automatic startup/timeout pauses wait passively for
+unsolicited `0x05` enquiries. The delay starts at the first enquiry and must
+elapse with regular enquiries. A gap exceeding 5 seconds or any other received
+byte restarts that observation. Resume requires a fresh enquiry after the delay;
+a timer alone cannot resume communication. P300 initialization then sends
+`16 00 00` directly, without a preceding `04` reset. Failed communication
+returns to the pause through the next request timeout. Recovery is supported
+only for P300; other protocols retain manual release.
+
+An explicit call to `set_communication_paused(true)` holds the pause manually,
+including when already paused, and disables automatic recovery for that pause.
 The pause rejects writes, cancels pending requests without replaying writes,
-and continues consuming RX for UART debug logging. The timeout latch is
-applied after the protocol callback returns, before the next protocol loop or
-new polling requests. It does not predict a controller power outage: the
-current transaction can remain active until its timeout is detected. For a
-planned controller restart, activate the pause beforehand. This is a manual
-interlock, not a verified automatic recovery or a diagnosis of controller faults.
+and continues consuming RX for UART debug logging. Timeout cancellation is
+applied after the protocol callback returns and before the next protocol loop.
+
+This cannot predict a controller power outage: an active transaction may remain
+until its timeout is detected. Regular `05` enquiries establish serial-interface
+readiness, not completion of the entire controller startup. The 120-second delay
+is an initial conservative setting, not yet validated on the user's controller.

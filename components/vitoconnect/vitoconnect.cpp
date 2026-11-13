@@ -50,8 +50,10 @@ void VitoConnect::setup() {
       
       // set initial state
       _optolink->begin();
-      if (communication_paused_)
-        ESP_LOGI(TAG, "Optolink starts PAUSED (TX disabled); manual release required");
+      if (communication_paused_) {
+        ESP_LOGI(TAG, "Optolink starts PAUSED (TX disabled)");
+        arm_recovery_();
+      }
 
     } else {
       ESP_LOGW(TAG, "Not able to initialize VitoConnect");
@@ -84,6 +86,8 @@ bool VitoConnect::write_datapoint(Datapoint *datapoint, uint8_t *data) {
 
 void VitoConnect::set_communication_paused(bool paused) {
     timeout_pause_pending_ = false;
+    recovery_armed_ = false;
+    enquiry_seen_ = false;
     if (communication_paused_ == paused) return;
     communication_paused_ = paused;
     if (_optolink) {
@@ -100,18 +104,62 @@ void VitoConnect::set_communication_paused(bool paused) {
     ESP_LOGI(TAG, "Optolink communication %s", paused ? "PAUSED (TX disabled)" : "RESUMED (new handshake)");
 }
 
+void VitoConnect::arm_recovery_() {
+    recovery_armed_ = recovery_delay_ > 0 && protocol == "P300";
+    enquiry_seen_ = false;
+    if (recovery_armed_)
+      ESP_LOGI(TAG, "Passive recovery: waiting for 05, then %lu ms of regular enquiries",
+               static_cast<unsigned long>(recovery_delay_));
+}
+
+void VitoConnect::receive_paused_() {
+    const uint32_t now = millis();
+    // A gap or unexpected bytes invalidate the readiness observation.
+    if (enquiry_seen_ && uint32_t(now - last_enquiry_) > 5000) {
+      enquiry_seen_ = false;
+      if (recovery_armed_) ESP_LOGI(TAG, "Enquiry stream interrupted; restarting recovery wait");
+    }
+    bool fresh_enquiry = false;
+    const int count = this->available();
+    for (int i = 0; i < count; ++i) {
+      const int byte = this->read();
+      if (!recovery_armed_) continue;
+      if (byte != 0x05) {
+        enquiry_seen_ = false;
+        fresh_enquiry = false;
+        continue;
+      }
+      if (!enquiry_seen_) {
+        first_enquiry_ = now;
+        enquiry_seen_ = true;
+        ESP_LOGI(TAG, "First unsolicited 05; recovery safety wait started");
+      }
+      last_enquiry_ = now;
+      fresh_enquiry = true;
+    }
+    if (recovery_armed_ && fresh_enquiry && enquiry_seen_ &&
+        uint32_t(now - first_enquiry_) >= recovery_delay_) {
+      // Resume only on a fresh enquiry, never from a timer alone.
+      recovery_armed_ = false;
+      enquiry_seen_ = false;
+      communication_paused_ = false;
+      _optolink->begin_after_enquiry();
+      ESP_LOGI(TAG, "Optolink automatic recovery: safety wait complete, P300 init without reset");
+    }
+}
+
 void VitoConnect::loop() {
     if (!_optolink) return;
     if (communication_paused_) {
-      // Consume RX for UART debug logging, but send neither commands nor ACKs.
-      const int count = this->available();
-      for (int i = 0; i < count; ++i) this->read();
+      // RX remains visible in UART debug; no TX during the safety wait.
+      receive_paused_();
     } else {
       _optolink->loop();
       // Defer cancellation until the protocol callback has popped its request.
       if (timeout_pause_pending_) {
-        ESP_LOGW(TAG, "Optolink timeout: pausing TX until manual release");
+        ESP_LOGW(TAG, "Optolink timeout: pausing TX");
         set_communication_paused(true);
+        arm_recovery_();
       } else {
         schedule_due_();
       }

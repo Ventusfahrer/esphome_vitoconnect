@@ -106,6 +106,8 @@ int main() {
  assert(link.read(0x2000,2)); assert(link.write(0x2000,2,value));
  uart.tx.clear(); link.cancel_pending();
  assert(failures == 5 && last_error == CANCELLED && uart.tx.empty());
+ link.begin_after_enquiry(); link.loop();
+ assert(uart.tx == std::vector<uint8_t>({0x16,0,0})); // No preceding reset byte.
  link.cancel_pending(); assert(failures == 5);
 }
 ''')

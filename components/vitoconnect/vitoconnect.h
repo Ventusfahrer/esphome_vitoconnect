@@ -60,6 +60,7 @@ class VitoConnect : public uart::UARTDevice, public PollingComponent {
     bool is_communication_paused() const { return communication_paused_; }
     void set_start_paused(bool paused) { communication_paused_ = paused; }
     void set_pause_on_timeout(bool enabled) { pause_on_timeout_ = enabled; }
+    void set_recovery_delay(uint32_t delay) { recovery_delay_ = delay; }
     bool write_datapoint(Datapoint *datapoint, uint8_t *data);
 
     void onData(std::function<void(const uint8_t* data, uint8_t length, Datapoint* dp)> callback);
@@ -87,6 +88,13 @@ class VitoConnect : public uart::UARTDevice, public PollingComponent {
     bool communication_paused_{false};
     bool pause_on_timeout_{false};
     bool timeout_pause_pending_{false};
+    uint32_t recovery_delay_{0};
+    bool recovery_armed_{false};
+    bool enquiry_seen_{false};
+    uint32_t first_enquiry_{0};
+    uint32_t last_enquiry_{0};
+    void arm_recovery_();
+    void receive_paused_();
     struct ScheduledDatapoint {
       Datapoint* dp;
       PollSchedule schedule;

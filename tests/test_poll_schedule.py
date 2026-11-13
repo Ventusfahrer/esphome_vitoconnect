@@ -58,10 +58,11 @@ namespace esphome { namespace uart {
 enum { UART_CONFIG_PARITY_EVEN };
 class UARTDevice { public:
  int rx_count = 0;
+ int rx_byte = 5;
  void check_uart_settings(int, int, int, int) {}
  void flush() {}
  int available() { return rx_count; }
- int read() { assert(rx_count > 0); --rx_count; return 5; }
+ int read() { assert(rx_count > 0); --rx_count; return rx_byte; }
 };
 }}
 ''')
@@ -97,9 +98,10 @@ class Optolink {
  explicit Optolink(void*) { instance = this; }
  void onData(decltype(data) cb) { data = cb; }
  void onError(decltype(error) cb) { error = cb; }
- unsigned begins = 0, loops = 0;
+ unsigned begins = 0, loops = 0, passive_begins = 0;
  bool timeout_next_loop = false;
  void begin() { ++begins; }
+ void begin_after_enquiry() { ++passive_begins; }
  void loop() {
    ++loops;
    if (timeout_next_loop && !queue.empty()) {
@@ -294,6 +296,49 @@ int main() {
  assert(transport->queue.size() == 2);
  transport->finish(); transport->finish();
  assert(first.count == 1 && second.count == 1);
+ // Automatic recovery needs a full stream of unsolicited enquiries, not time alone.
+ VitoConnect automatic;
+ Value automatic_value; automatic_value.setAddress(12); automatic_value.setLength(1);
+ automatic.set_protocol("P300"); automatic.set_update_interval(10000);
+ automatic.set_start_paused(true); automatic.set_pause_on_timeout(true);
+ automatic.set_recovery_delay(120000);
+ automatic.register_datapoint(&automatic_value);
+ automatic.setup(); transport = Optolink::instance;
+ test_now = UINT32_MAX - 99999; // Exercise timer rollover during safety wait.
+ automatic.loop();
+ assert(automatic.is_communication_paused() && transport->loops == 0);
+ for (int i=0; i<60; ++i) {
+   automatic.rx_count = 1; automatic.loop(); test_now += 2000;
+   assert(automatic.is_communication_paused());
+ }
+ automatic.loop(); // Delay expired, but no new 05: still silent.
+ assert(automatic.is_communication_paused());
+ automatic.rx_count = 1; automatic.loop();
+ assert(!automatic.is_communication_paused() && transport->passive_begins == 1);
+ assert(transport->loops == 0 && transport->queue.empty());
+ automatic.loop(); assert(transport->queue.size() == 1);
+ transport->timeout_next_loop = true; automatic.loop();
+ assert(automatic.is_communication_paused() && transport->queue.empty());
+ automatic.rx_count = 1; automatic.loop();
+ test_now += 6000; automatic.rx_count = 1; automatic.loop(); // gap restarts timer
+ for (int i=0; i<59; ++i) {
+   test_now += 2000; automatic.rx_count = 1; automatic.loop();
+ }
+ assert(automatic.is_communication_paused());
+ automatic.rx_byte = 6; automatic.rx_count = 1; automatic.loop(); // unexpected byte restarts
+ automatic.rx_byte = 5;
+ for (int i=0; i<60; ++i) {
+   test_now += 2000; automatic.rx_count = 1; automatic.loop();
+   assert(automatic.is_communication_paused());
+ }
+ test_now += 2000; automatic.rx_count = 1; automatic.loop();
+ assert(!automatic.is_communication_paused() && transport->passive_begins == 2);
+ automatic.loop(); transport->finish();
+ automatic.set_communication_paused(true); // Explicit manual pause must not auto-release.
+ for (int i=0; i<65; ++i) {
+   test_now += 2000; automatic.rx_count = 1; automatic.loop();
+ }
+ assert(automatic.is_communication_paused() && transport->passive_begins == 2);
  VitoConnect invalid; invalid.set_protocol("invalid"); invalid.setup(); invalid.loop();
 }
 ''')

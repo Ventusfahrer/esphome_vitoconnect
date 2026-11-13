@@ -56,6 +56,13 @@ void OptolinkP300::begin() {
   _state = RESET;
 }
 
+void OptolinkP300::begin_after_enquiry() {
+  // A fresh unsolicited 0x05 already establishes KW readiness; no 0x04 needed.
+  _lastMillis = millis();
+  _rcvBufferLen = 0;
+  _state = INIT;
+}
+
 void OptolinkP300::loop() {
   switch (_state) {
   case RESET:

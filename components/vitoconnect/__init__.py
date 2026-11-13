@@ -15,6 +15,7 @@ VitoConnect = vitoconnect_ns.class_("VitoConnect", uart.UARTDevice, cg.PollingCo
 CONF_VITOCONNECT_ID = "vitoconnect_id"
 CONF_START_PAUSED = "start_paused"
 CONF_PAUSE_ON_TIMEOUT = "pause_on_timeout"
+CONF_RECOVERY_DELAY = "recovery_delay"
 
 OPTOLINK_PROTOCOL = {
     "P300": "P300",
@@ -28,6 +29,7 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Required(CONF_PROTOCOL): cv.enum(OPTOLINK_PROTOCOL, upper=True, space="_"),
         cv.Optional(CONF_START_PAUSED, default=False): cv.boolean,
         cv.Optional(CONF_PAUSE_ON_TIMEOUT, default=False): cv.boolean,
+        cv.Optional(CONF_RECOVERY_DELAY): cv.positive_time_period_milliseconds,
         cv.Optional(
             CONF_UPDATE_INTERVAL, default="60s"
         ): cv.positive_time_period_milliseconds,
@@ -42,4 +44,6 @@ async def to_code(config):
     cg.add(var.set_protocol(config[CONF_PROTOCOL]))
     cg.add(var.set_start_paused(config[CONF_START_PAUSED]))
     cg.add(var.set_pause_on_timeout(config[CONF_PAUSE_ON_TIMEOUT]))
+    if CONF_RECOVERY_DELAY in config:
+        cg.add(var.set_recovery_delay(config[CONF_RECOVERY_DELAY]))
     cg.add(var.set_update_interval(config[CONF_UPDATE_INTERVAL]))

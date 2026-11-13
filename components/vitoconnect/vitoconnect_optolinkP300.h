@@ -60,6 +60,7 @@ class OptolinkP300 : public Optolink {
    * with the right settings.
    */
   void begin();
+  void begin_after_enquiry() override;
 
   /**
    * @brief Method to keep the Optolink running.
