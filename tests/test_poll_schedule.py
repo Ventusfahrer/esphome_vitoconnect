@@ -53,9 +53,16 @@ class PollingComponent {
 ''')
             stub('esphome/components/uart/uart.h', '''
 #pragma once
+#include <cassert>
 namespace esphome { namespace uart {
 enum { UART_CONFIG_PARITY_EVEN };
-class UARTDevice { public: void check_uart_settings(int, int, int, int) {} };
+class UARTDevice { public:
+ int rx_count = 0;
+ void check_uart_settings(int, int, int, int) {}
+ void flush() {}
+ int available() { return rx_count; }
+ int read() { assert(rx_count > 0); --rx_count; return 5; }
+};
 }}
 ''')
             stub('esphome/components/uart/uart_component.h', '#pragma once\n')
@@ -77,6 +84,7 @@ class Number {
 #include <cstdint>
 #include <vector>
 namespace esphome { namespace vitoconnect {
+enum { CANCELLED = 5 };
 class Optolink {
  public:
  struct Request { uint16_t address; void* arg; };
@@ -89,7 +97,14 @@ class Optolink {
  explicit Optolink(void*) { instance = this; }
  void onData(decltype(data) cb) { data = cb; }
  void onError(decltype(error) cb) { error = cb; }
- void begin() {} void loop() {}
+ unsigned begins = 0, loops = 0;
+ void begin() { ++begins; } void loop() { ++loops; }
+ void cancel_pending() {
+   while (!queue.empty()) {
+     auto request = queue.front(); queue.erase(queue.begin());
+     error(CANCELLED, request.arg);
+   }
+ }
  bool read(uint16_t address, uint8_t, void* arg) {
    if (queue.size() == 2) return false;
    queue.push_back({address, arg}); sent.push_back(address); return true;
@@ -225,6 +240,25 @@ int main() {
  writer.loop(); assert(transport->queue.size() == 1);
  transport->finish(true); // Failed readback: retain last confirmed value.
  assert(room.publications == 1 && room.state == 22);
+ // Pausing cancels both reads and writes, rejects new work, and keeps RX/logs alive.
+ test_now += 60000;
+ room.control(21); writer.loop();
+ assert(transport->queue.size() == 2);
+ auto loops_before = transport->loops;
+ writer.set_communication_paused(true);
+ assert(writer.is_communication_paused() && transport->queue.empty());
+ writer.rx_count = 3;
+ writer.loop(); writer.update(); room.control(22);
+ assert(writer.rx_count == 0 && transport->queue.empty());
+ assert(transport->loops == loops_before);
+ writer.print_sensor_report();
+ assert(report_lines.back().find("Zuletzt Fehler: 1") != std::string::npos);
+ writer.rx_count = 2;
+ writer.set_communication_paused(false);
+ assert(writer.rx_count == 0 && transport->begins == 2);
+ writer.set_communication_paused(false); assert(transport->begins == 2);
+ writer.loop(); assert(transport->queue.size() == 1);
+ transport->finish(true);
  VitoConnect invalid; invalid.set_protocol("invalid"); invalid.setup(); invalid.loop();
 }
 ''')

@@ -26,7 +26,8 @@ class UARTDevice {
  std::deque<uint8_t> rx;
  std::vector<uint8_t> tx;
  int available() { return rx.size(); }
- int read() { if (rx.empty()) return -1; auto b=rx.front(); rx.pop_front(); return b; }
+ unsigned empty_reads = 0;
+ int read() { if (rx.empty()) { ++empty_reads; return -1; } auto b=rx.front(); rx.pop_front(); return b; }
  void flush() {}
  void write_array(const uint8_t *data, size_t length) { tx.assign(data, data+length); }
 };
@@ -64,6 +65,14 @@ int main() {
  esphome::uart::UARTDevice uart;
  OptolinkP300 link(&uart);
  link.onData(success); link.onError(failure);
+ link.begin(); link.loop(); assert(uart.tx == std::vector<uint8_t>({4}));
+ uart.tx.clear();
+ for (int i=0; i<100; ++i) link.loop();
+ assert(uart.empty_reads == 0 && uart.tx.empty());
+ test_now = 1001; link.loop(); link.loop();
+ assert(uart.tx == std::vector<uint8_t>({4}));
+ uart.rx.push_back(5); link.loop(); link.loop();
+ assert(uart.tx == std::vector<uint8_t>({0x16,0,0}));
  for (int i=0; i<100; ++i) {
    { uint8_t value[] = {0xDC, 0}; assert(link.write(0x2000, 2, value, reinterpret_cast<void*>(123))); }
    // Allocations after the temporary queue copies are destroyed must not change payload.
@@ -94,6 +103,10 @@ int main() {
  assert(link.write(0x2000,2,value)); link._send();
  deliver(link, uart, {0x41,255});
  assert(failures == 3 && last_error == LENGTH);
+ assert(link.read(0x2000,2)); assert(link.write(0x2000,2,value));
+ uart.tx.clear(); link.cancel_pending();
+ assert(failures == 5 && last_error == CANCELLED && uart.tx.empty());
+ link.cancel_pending(); assert(failures == 5);
 }
 ''')
             component = ROOT / 'components/vitoconnect'

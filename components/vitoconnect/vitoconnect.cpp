@@ -66,7 +66,7 @@ void VitoConnect::register_datapoint(Datapoint *datapoint, uint32_t update_inter
 }
 
 bool VitoConnect::write_datapoint(Datapoint *datapoint, uint8_t *data) {
-    if (!_optolink || protocol != "P300") return false;
+    if (!_optolink || communication_paused_ || protocol != "P300") return false;
     for (auto &entry : _datapoints) {
       if (entry.dp != datapoint) continue;
       CbArg *arg = new CbArg(this, &entry);
@@ -80,10 +80,33 @@ bool VitoConnect::write_datapoint(Datapoint *datapoint, uint8_t *data) {
     return false;
 }
 
+void VitoConnect::set_communication_paused(bool paused) {
+    if (communication_paused_ == paused) return;
+    communication_paused_ = paused;
+    if (_optolink) {
+      if (paused) {
+        // Finish bytes already handed to UART before declaring the pause active.
+        this->flush();
+        _optolink->cancel_pending();
+      } else {
+        // Discard stale replies and restart the handshake, never resume mid-frame.
+        while (this->available()) this->read();
+        _optolink->begin();
+      }
+    }
+    ESP_LOGI(TAG, "Optolink communication %s", paused ? "PAUSED (TX disabled)" : "RESUMED (new handshake)");
+}
+
 void VitoConnect::loop() {
     if (!_optolink) return;
-    _optolink->loop();
-    schedule_due_();
+    if (communication_paused_) {
+      // Consume RX for UART debug logging, but send neither commands nor ACKs.
+      const int count = this->available();
+      for (int i = 0; i < count; ++i) this->read();
+    } else {
+      _optolink->loop();
+      schedule_due_();
+    }
     report_next_();
 }
 
@@ -92,7 +115,7 @@ void VitoConnect::update() {
 }
 
 void VitoConnect::schedule_due_() {
-    if (!_optolink) return;
+    if (!_optolink || communication_paused_) return;
     const uint32_t now = millis();
     for (auto &entry : _datapoints) {
       if (!entry.schedule.due(now, this->get_update_interval())) continue;
@@ -162,8 +185,14 @@ void VitoConnect::_onData(uint8_t* data, uint8_t len, void* arg) {
 }
 
 void VitoConnect::_onError(uint8_t error, void* arg) {
-  ESP_LOGD(TAG, "Error received: %d", error);
   CbArg* cbArg = reinterpret_cast<CbArg*>(arg);
+  if (error == CANCELLED) {
+    cbArg->scheduled->schedule.complete();
+    cbArg->scheduled->schedule.started = false;
+    delete cbArg;
+    return;
+  }
+  ESP_LOGD(TAG, "Error received: %d", error);
   if (cbArg->writing) {
     ESP_LOGW(TAG, "Write failed at 0x%04X: %u", cbArg->dp->getAddress(), error);
     cbArg->scheduled->schedule.started = false;

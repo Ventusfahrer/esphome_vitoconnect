@@ -106,7 +106,7 @@ void OptolinkP300::_reset() {
 }
 
 void OptolinkP300::_resetAck() {
-  if (_uart->read() == 0x05) {
+  if (_uart->available() && _uart->read() == 0x05) {
     // received 0x05/enquiry: optolink has been reset
     _lastMillis = millis();
     _state = INIT;

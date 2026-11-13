@@ -56,6 +56,8 @@ class VitoConnect : public uart::UARTDevice, public PollingComponent {
     void register_datapoint(Datapoint *datapoint, uint32_t update_interval = 0,
                             const std::string &name = "");
     void print_sensor_report();
+    void set_communication_paused(bool paused);
+    bool is_communication_paused() const { return communication_paused_; }
     bool write_datapoint(Datapoint *datapoint, uint8_t *data);
 
     void onData(std::function<void(const uint8_t* data, uint8_t length, Datapoint* dp)> callback);
@@ -80,6 +82,7 @@ class VitoConnect : public uart::UARTDevice, public PollingComponent {
 
   private:
     Optolink* _optolink{nullptr};
+    bool communication_paused_{false};
     struct ScheduledDatapoint {
       Datapoint* dp;
       PollSchedule schedule;

@@ -91,7 +91,8 @@ enum OptolinkError : uint8_t {
   LENGTH,     ///< Received message length differs from expected length
   NACK,       ///< Message was nacked by Vitotronic
   CRC,        ///< Checksum failed (only for P300)
-  VITO_ERROR  ///< General error
+  VITO_ERROR, ///< General error
+  CANCELLED   ///< Request cancelled locally while pausing communication
 };
 
 typedef void (*OnDataArgCallback)(uint8_t* data, uint8_t len, void* arg);
@@ -180,6 +181,9 @@ class Optolink {
    *        classes).
    */
   virtual void begin() = 0;
+
+  // Cancel queued requests through their callbacks so owners can release state.
+  void cancel_pending();
 
   /**
    * @brief Pure virtual method to keep the Optolink running (implemented in
